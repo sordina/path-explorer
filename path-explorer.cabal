@@ -1,0 +1,24 @@
+cabal-version:       >=1.10
+name:                path-explorer
+version:             0.1.0.0
+license-file:        LICENSE
+author:              Lyndon Maydwell
+maintainer:          lyndon@sordina.net
+build-type:          Simple
+extra-source-files:  CHANGELOG.md
+
+executable path-explorer
+  main-is:          Main.hs
+  build-depends:    base >=4.14 && <4.15,
+                    brick,
+                    microlens,
+                    microlens-th,
+                    text,
+                    vty,
+                    containers,
+                    split
+  hs-source-dirs:   src
+  default-language: Haskell2010
+  other-modules:    Form
+  ghc-options:      -Wall -threaded
+
