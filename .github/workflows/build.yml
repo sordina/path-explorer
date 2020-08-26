@@ -11,9 +11,9 @@ jobs:
       BOOTSTRAP_HASKELL_CABAL_VERSION: 3.2.0.0
     steps:
       - uses: actions/checkout@v2
+      - run: apt update
       - run: apt install -y build-essential curl libffi-dev libffi6 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5
       - run: curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh
       - run: echo "::add-path::$HOME/.ghcup/bin"
       - run: cabal build
-        working-directory: /github/workspace/server
 
