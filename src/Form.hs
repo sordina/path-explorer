@@ -1,125 +1,103 @@
 {-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TemplateHaskell   #-}
 
 module Form where
 
-import qualified System.Environment   as Env
 import qualified Data.Map             as M
 import qualified Data.Text            as T
+import qualified System.Environment   as Env
+import qualified System.Process       as P
 
-import           Lens.Micro           ((^.), lens, Lens')
+import           GHC.IO.Exception     (ExitCode)
+import           Lens.Micro           (Lens', lens, (.~), (&))
 import           Lens.Micro.TH
 
 import qualified Graphics.Vty         as V
 
 import           Brick
-import           Data.Maybe
+import           Data.List            (intercalate)
 import           Data.List.Split
+import           Data.Maybe
 
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.Center as C
 import qualified Brick.Widgets.Edit   as E
 
-import           Brick.Forms          (Form, allFieldsValid, checkboxField,
-                                       editPasswordField, editShowableField,
+import           Brick.Forms          (Form, checkboxField, setFormFocus,
                                        editTextField, focusedFormInputAttr,
                                        formFocus, formState, handleFormEvent,
-                                       invalidFields, invalidFormInputAttr,
-                                       newForm, radioField, renderForm,
-                                       setFieldValid, (@@=))
+                                       invalidFormInputAttr,
+                                       newForm, renderForm,
+                                       (@@=))
 
 import           Brick.Focus          (focusGetCurrent, focusRingCursor)
 
-type SegmentMap = M.Map String Bool
 
-seg :: String -> Lens' SegmentMap Bool
-seg k = lens (fromMaybe False . M.lookup k) (\m b -> M.insert k b m)
+-- Types and Lenses
 
-data Name = NameField
-          | AgeField
-          | BikeField
-          | HandedField
-          | PasswordField
-          | LeftHandField
-          | RightHandField
-          | AmbiField
-          | AddressField
-          | Segment String
+data Name = Segment String
           | Command
           deriving (Eq, Ord, Show)
 
-data Handedness = LeftHanded | RightHanded | Ambidextrous deriving (Show, Eq)
+type SegmentMap = M.Map String Bool
 
 data AppState =
-    AppState { _name      :: T.Text
-             , _age       :: Int
-             , _address   :: T.Text
-             , _ridesBike :: Bool
-             , _handed    :: Handedness
-             , _password  :: T.Text
-             , _command   :: T.Text
-             , _segments  :: SegmentMap
-             }
-             deriving (Show)
+    AppState
+      { _command  :: T.Text
+      , _segments :: SegmentMap
+      , _output   :: Maybe (ExitCode, String, String)
+      }
+      deriving (Show)
 
 makeLenses ''AppState
 
--- This form is covered in the Brick User Guide; see the "Input Forms" section.
+seg :: String -> Lens' SegmentMap Bool
+seg k = lens (fromMaybe False . M.lookup k) (\m b -> if b then M.insert k True m else M.delete k m)
+
+
+-- Forms
+
 mkForm :: AppState -> Form AppState e Name
 mkForm state =
-    let label s w = padBottom (Pad 1) $
-                    (vLimit 1 $ hLimit 15 $ str s <+> fill ' ') <+> w
+    let label s w = padBottom (Pad 1) $ (vLimit 1 $ hLimit 15 $ str s <+> fill ' ') <+> w
     in flip newForm state $
-      [ label "Name" @@= editTextField name NameField (Just 1)
-      , label "Address" @@= B.borderWithLabel (str "Mailing") @@= editTextField address AddressField (Just 3)
-      , label "Age" @@= editShowableField age AgeField
-      , label "Password" @@= editPasswordField password PasswordField
-      , label "Dominant hand" @@=
-                   radioField handed [ (LeftHanded, LeftHandField, "Left")
-                                     , (RightHanded, RightHandField, "Right")
-                                     , (Ambidextrous, AmbiField, "Both")
-                                     ]
-      , label "" @@= checkboxField ridesBike BikeField "Do you ride a bicycle?"
-      , label "Command" @@= editTextField command Command (Just 1)
-      ] ++ map (makeSegInput label) (M.toList $ _segments state)
+      [ label "Command" @@= editTextField command Command (Just 1)
+      ] ++ map (makeSegInput) (M.toList $ _segments state)
 
--- makeSegInput :: Data.String.IsString t => (t -> Widget Name -> Widget Name) -> (String, b) -> AppState -> Brick.Forms.FormFieldState AppState e Name
-makeSegInput label (k, _v) = label "" @@= checkboxField (segments . seg k) (Segment k) (T.pack k)
+  where
+  makeSegInput (k, _v) = checkboxField (segments . seg k) (Segment k) (T.pack k)
 
 style :: AttrMap
 style = attrMap V.defAttr
-  [ (E.editAttr, V.white `on` V.black)
-  , (E.editFocusedAttr, V.black `on` V.yellow)
+  [ (E.editAttr          , V.white `on` V.black)
+  , (E.editFocusedAttr   , V.black `on` V.yellow)
   , (invalidFormInputAttr, V.white `on` V.red)
   , (focusedFormInputAttr, V.black `on` V.yellow)
   ]
 
 draw :: Form AppState e Name -> [Widget Name]
 draw f = [C.vCenter $ C.hCenter form <=> C.hCenter help]
-    where
-        form = B.border $ padTop (Pad 1) $ hLimit 50 $ renderForm f
-        help = padTop (Pad 1) $ B.borderWithLabel (str "Help") body
-        body = str $ "- Name is free-form text\n" <>
-                     "- Age must be an integer (try entering an\n" <>
-                     "  invalid age!)\n" <>
-                     "- Handedness selects from a list of options\n" <>
-                     "- The last option is a checkbox\n" <>
-                     "- Enter/Esc quit, mouse interacts with fields"
+  where
+    form = B.border $ padTop (Pad 1) $ hLimit 88 $ renderForm f
+    help = padTop (Pad 1) $ B.borderWithLabel (str "Output") body
+    body = str $ show $ _output $ formState f
 
 eventHandler :: Form AppState e Name -> BrickEvent Name e -> EventM Name (Next (Form AppState e Name))
 eventHandler s ev =
   case ev of
-      VtyEvent (V.EvResize {})     -> continue s
+      VtyEvent (V.EvResize {})       -> continue s
       VtyEvent (V.EvKey V.KEsc [])   -> halt s
-      VtyEvent (V.EvKey V.KEnter []) | focusGetCurrent (formFocus s) /= Just AddressField -> halt s
       _ -> do
-          s' <- handleFormEvent ev s
-
-          -- Example of external validation:
-          -- Require age field to contain a value that is at least 18.
-          continue $ setFieldValid ((formState s')^.age >= 18) AgeField s'
+        s' <- handleFormEvent ev s
+        if focusGetCurrent (formFocus s') == Just Command
+           then s' & formState & output .~ Nothing & mkForm & continue
+           else do
+             case ev of
+               VtyEvent (V.EvKey (V.KChar 'q') [])        -> halt s
+               VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]) -> halt s
+               _                                          -> continue s'
 
 app :: App (Form AppState e Name) e Name
 app =
@@ -130,37 +108,35 @@ app =
         , appHandleEvent  = eventHandler
         }
 
+getOut :: [Char] -> [Char] -> IO (ExitCode, String, String)
+getOut s p = do
+  let
+    p1 = P.shell s
+    p2 = p1 { P.env = Just [("PATH", p)] }
+
+  P.readCreateProcessWithExitCode p2 ""
+
 main :: IO ()
 main = do
     path <- Env.getEnv "PATH"
+    out  <- Just <$> getOut "date +s" []
 
     let buildVty = do
           v <- V.mkVty =<< V.standardIOConfig
           V.setMode (V.outputIface v) V.Mouse True
           return v
 
-        initialUserInfo = AppState { _name      = ""
-                                   , _address   = ""
-                                   , _age       = 0
-                                   , _handed    = RightHanded
-                                   , _ridesBike = False
-                                   , _password  = ""
-                                   , _command   = "date"
-                                   , _segments  = M.fromList $ zip (splitOn ":" path) (repeat True)
-                                   }
+        state =
+          AppState
+            { _command  = "date +s"
+            , _segments = M.fromList $ zip (splitOn ":" path) (repeat True)
+            , _output   = out
+            }
 
-        f = setFieldValid False AgeField $ mkForm initialUserInfo
+        form = mkForm state
 
     initialVty <- buildVty
-    result     <- customMain initialVty buildVty Nothing app f
+    result     <- customMain initialVty buildVty Nothing app form
 
-    putStrLn "The starting form state was:"
-    print initialUserInfo
-
-    putStrLn "The final form state was:"
-    print $ formState result
-
-    if allFieldsValid result
-       then putStrLn "The final form inputs were valid."
-       else putStrLn $ "The final form had invalid inputs: " <> show (invalidFields result)
+    putStrLn $ ("PATH=" ++) $  intercalate ":" $ M.keys $ _segments $ formState result
 

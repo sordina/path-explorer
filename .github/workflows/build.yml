@@ -12,10 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: rm -rf /var/lib/apt/lists/lock
-        become: true
-        become_method: su
-        become_user: root
-
       - run: apt update
       - run: apt install -y build-essential curl libffi-dev libffi6 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5
       - run: curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh
