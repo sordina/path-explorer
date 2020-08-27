@@ -20,16 +20,17 @@ import           System.Exit              (ExitCode (..))
 
 import qualified Graphics.Vty             as V
 
-import           Brick
 import           Data.List                (intercalate)
 import           Data.List.Split
 import           Data.Maybe
 
+import           Brick
+import qualified Brick.Widgets.Core       as Core
+import qualified Brick.Types              as Types
 import qualified Brick.Widgets.Border     as B
 import qualified Brick.Widgets.Center     as C
 import qualified Brick.Widgets.Edit       as E
 import qualified Brick.BChan              as BChan
-
 import           Brick.Forms              (Form, checkboxField, editTextField,
                                            focusedFormInputAttr, formFocus,
                                            formState, handleFormEvent,
@@ -44,6 +45,7 @@ import           Brick.Focus              (focusGetCurrent, focusRingCursor)
 data Name
   = Segment String
   | Command
+  | OutPort
   deriving (Eq, Ord, Show)
 
 type PathSegments = M.Map String Bool
@@ -91,14 +93,15 @@ style = attrMap V.defAttr
   ]
 
 draw :: Form AppState e Name -> [Widget Name]
-draw f = [C.vCenter $ C.hCenter form <=> C.hCenter help]
+draw f = [ padTop (Pad 2) (C.hCenter form) <=> C.hCenter outW]
   where
     out "" = ""
     out o  = "\n\nSTDOUT:\n\n" <> o
     err "" = ""
     err e  = "\n\nSTDERR:\n\n" <> e
-    form   = B.border $ padTop (Pad 1) $ hLimit 88 $ renderForm f
-    help   = padTop (Pad 1) $ B.borderWithLabel (str (fst body)) (str (snd body))
+    form   = B.borderWithLabel (str " ~ Path Explorer ~ ") $ hLimit 88 $ renderForm f
+    outW   = padTop (Pad 1) $ B.borderWithLabel (str (fst body))
+           $ vLimit 44 $ hLimit 88 (Core.viewport OutPort Types.Vertical (str (snd body)))
     body   = case _output (formState f) of
                Right (ExitSuccess, o, _) -> ("Success", o)
                Left s                    -> ("", s)
