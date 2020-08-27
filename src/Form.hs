@@ -2,58 +2,73 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE BlockArguments   #-}
 
 module Form where
 
-import qualified Data.Map             as M
-import qualified Data.Text            as T
-import qualified System.Environment   as Env
-import qualified System.Process       as P
+-- TODO: VSCode
 
-import           System.Exit          (ExitCode(..))
-import           Lens.Micro           (Lens', lens, (&), (.~))
-import           Lens.Micro.TH
+import qualified Control.Concurrent.Async as Async
+import qualified Data.Map                 as M
+import qualified Data.Text                as T
+import qualified System.Environment       as Env
+import qualified System.Process           as P
+
+import           Control.Arrow            (left)
 import           Control.Monad.IO.Class
+import           Lens.Micro               (Lens', lens, (&), (.~))
+import           Lens.Micro.TH
+import           System.Exit              (ExitCode (..))
 
-import qualified Graphics.Vty         as V
+import qualified Graphics.Vty             as V
 
 import           Brick
-import           Data.List            (intercalate)
+import           Data.List                (intercalate)
 import           Data.List.Split
 import           Data.Maybe
 
-import qualified Brick.Widgets.Border as B
-import qualified Brick.Widgets.Center as C
-import qualified Brick.Widgets.Edit   as E
+import qualified Brick.Widgets.Border     as B
+import qualified Brick.Widgets.Center     as C
+import qualified Brick.Widgets.Edit       as E
+import qualified Brick.BChan              as BChan
 
-import           Brick.Forms          (Form, checkboxField, editTextField,
-                                       focusedFormInputAttr, formFocus, setFormFocus,
-                                       formState, handleFormEvent,
-                                       invalidFormInputAttr, newForm,
-                                       renderForm, (@@=))
+import           Brick.Forms              (Form, checkboxField, editTextField,
+                                           focusedFormInputAttr, formFocus,
+                                           formState, handleFormEvent,
+                                           invalidFormInputAttr, newForm,
+                                           renderForm, setFormFocus, (@@=))
 
-import           Brick.Focus          (focusGetCurrent, focusRingCursor)
+import           Brick.Focus              (focusGetCurrent, focusRingCursor)
 
 
 -- Types and Lenses
 
-data Name = Segment String
-          | Command
-          deriving (Eq, Ord, Show)
+data Name
+  = Segment String
+  | Command
+  deriving (Eq, Ord, Show)
 
-type SegmentMap = M.Map String Bool
+type PathSegments = M.Map String Bool
 
-data AppState =
-    AppState
-      { _command  :: T.Text
-      , _segments :: SegmentMap
-      , _output   :: Maybe (ExitCode, String, String)
-      }
-      deriving (Show)
+data Hide a = Hide { unHide :: a }
+
+instance Show (Hide a) where show (Hide _) = "HIDDEN"
+
+type ProcessResult = (ExitCode, String, String)
+
+type Bus = BChan.BChan ()
+
+data AppState = AppState
+    { _command  :: T.Text
+    , _segments :: PathSegments
+    , _action   :: Hide (Async.Async ProcessResult)
+    , _output   :: Either String (ExitCode, String, String)
+    }
+    deriving (Show)
 
 makeLenses ''AppState
 
-seg :: String -> Lens' SegmentMap Bool
+seg :: String -> Lens' PathSegments Bool
 seg k = lens (fromMaybe False . M.lookup k) (\m b -> M.insert k b m)
 
 
@@ -87,21 +102,29 @@ draw f = [C.vCenter $ C.hCenter form <=> C.hCenter help]
     form   = B.border $ padTop (Pad 1) $ hLimit 88 $ renderForm f
     help   = padTop (Pad 1) $ B.borderWithLabel (str "Output") (str body)
     body   = case _output (formState f) of
-               Nothing                  -> "Unknown Error"
-               Just (ExitSuccess, o, _) -> o
-               Just (c, o, e)           -> "Error: " <> show c <> out o <> err e
+               Right (ExitSuccess, o, _) -> o
+               Left s                    -> s
+               Right (c, o, e)           -> "Error: " <> show c <> out o <> err e
 
-segs :: Form AppState e n -> SegmentMap
+segs :: Form AppState e n -> PathSegments
 segs = _segments . formState
 
 cmd :: Form AppState e n -> String
 cmd = T.unpack . _command . formState
 
-eventHandler :: Form AppState e Name -> BrickEvent Name e -> EventM Name (Next (Form AppState e Name))
-eventHandler s (VtyEvent (V.EvResize {}))            = continue s
-eventHandler s (VtyEvent (V.EvKey V.KEsc _))         = halt s
-eventHandler s e = do
-  s' <- handleFormEvent e s
+-- TODO: updatePreserveFocus :: ...
+
+setFF :: Eq n => Form s e n -> Form s e n -> Form s e n
+setFF s s' =
+  case focusGetCurrent (formFocus s) of
+    Nothing -> s'
+    Just f  -> setFormFocus f s'
+
+eventHandler :: Bus -> Form AppState e Name -> BrickEvent Name e -> EventM Name (Next (Form AppState e Name))
+eventHandler _ s (VtyEvent (V.EvResize {}))            = continue s
+eventHandler _ s (VtyEvent (V.EvKey V.KEsc _))         = halt s
+eventHandler chan s e = do
+  s' <- handleFormEvent e s >>= resolveAction
 
   let
     psegs = segs s
@@ -113,57 +136,82 @@ eventHandler s e = do
     (VtyEvent (V.EvKey (V.KChar 'q') _), Just Command) -> continue s'
     (VtyEvent (V.EvKey (V.KChar 'q') _), _)            -> halt s
     _ | psegs == segs s' && c == c'                    -> continue s'
-    (_, Nothing)                                       -> continue s'
-    (_, Just f)                                        -> do
-      o <- liftIO $ getOut c' (getPath s')
-      s' & formState & output .~ (Just o) & mkForm & setFormFocus f & continue
+    _ -> do
+      liftIO $ Async.cancel $ unHide $ _action $ formState $ s'
+      a <- getOut chan c' (getPath s')
+      s' & formState & action .~ a & mkForm & setFF s' & continue
 
-app :: App (Form AppState e Name) e Name
-app =
+resolveAction :: MonadIO m => Form AppState e Name -> m (Form AppState e Name)
+resolveAction s = do
+  p <- liftIO $ Async.poll $ unHide $ _action $ formState s
+  case p of
+    Nothing -> return $ s & formState & output .~ Left "Loading" & mkForm & setFF s
+    Just r  -> return $ s & formState & output .~ left show r & mkForm & setFF s
+
+app :: Bus -> App (Form AppState e Name) e Name
+app chan =
     App { appDraw         = draw
         , appChooseCursor = focusRingCursor formFocus
         , appStartEvent   = return
         , appAttrMap      = const style
-        , appHandleEvent  = eventHandler
+        , appHandleEvent  = eventHandler chan
         }
 
-getOut :: String -> [String] -> IO (ExitCode, String, String)
-getOut s p = do
+getOut :: MonadIO m => Bus -> [Char] -> [[Char]] -> m (Hide (Async.Async (ExitCode, String, String)))
+getOut c s p = liftIO $ do
   let
     p1 = P.shell s
     p2 = p1 { P.env = Just [("PATH", mkPath p)] }
 
-  P.readCreateProcessWithExitCode p2 ""
+  a <- Async.async do
+    r <- P.readCreateProcessWithExitCode p2 ""
+    _ <- BChan.writeBChanNonBlocking c () -- Immediately update once completed
+    return r
 
-mkPath :: [[Char]] -> [Char]
+  _ <- BChan.writeBChanNonBlocking c () -- Immediately update as pending
+  return $ Hide a
+
+mkPath :: [String] -> String
 mkPath  = intercalate ":"
 
 getPath :: Form AppState e n -> [String]
 getPath = map fst . filter snd . M.toList . _segments . formState
 
+initialCommand :: String
+initialCommand = "ls"
+
 main :: IO ()
 main = do
-    let initialCommand = "ls"
-
     path <- splitOn ":" <$> Env.getEnv "PATH"
-    out  <- Just <$> getOut initialCommand path
+    chan <- BChan.newBChan 1 -- Event prompting channel
+    ls   <- getOut chan initialCommand path
 
-    let buildVty = do
+    -- Wake up the eventloop to check for async actions periodically
+    -- Not required now that `getOut` signals its status
+    {-
+    _ <- Async.async do
+          forever do
+            Conc.threadDelay 100000
+            BChan.writeBChanNonBlocking chan ()
+            -}
+
+    let
+      buildVty = do
           v <- V.mkVty =<< V.standardIOConfig
           V.setMode (V.outputIface v) V.Mouse True
           return v
 
-        state =
+      state =
           AppState
             { _command  = T.pack initialCommand
             , _segments = M.fromList $ zip path (repeat True)
-            , _output   = out
+            , _action   = ls
+            , _output   = Left "Nothing Yet!"
             }
 
-        form = mkForm state
+      form = mkForm state
 
     initialVty <- buildVty
-    result     <- customMain initialVty buildVty Nothing app form
+    result     <- customMain initialVty buildVty (Just chan) (app chan) form
 
     putStrLn $ ("PATH=" ++) $ mkPath $ getPath result
-
