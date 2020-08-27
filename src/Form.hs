@@ -10,9 +10,10 @@ import qualified Data.Text            as T
 import qualified System.Environment   as Env
 import qualified System.Process       as P
 
-import           GHC.IO.Exception     (ExitCode)
-import           Lens.Micro           (Lens', lens, (.~), (&))
+import           System.Exit          (ExitCode(..))
+import           Lens.Micro           (Lens', lens, (&), (.~))
 import           Lens.Micro.TH
+import           Control.Monad.IO.Class
 
 import qualified Graphics.Vty         as V
 
@@ -25,12 +26,11 @@ import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.Center as C
 import qualified Brick.Widgets.Edit   as E
 
-import           Brick.Forms          (Form, checkboxField, setFormFocus,
-                                       editTextField, focusedFormInputAttr,
-                                       formFocus, formState, handleFormEvent,
-                                       invalidFormInputAttr,
-                                       newForm, renderForm,
-                                       (@@=))
+import           Brick.Forms          (Form, checkboxField, editTextField,
+                                       focusedFormInputAttr, formFocus, setFormFocus,
+                                       formState, handleFormEvent,
+                                       invalidFormInputAttr, newForm,
+                                       renderForm, (@@=))
 
 import           Brick.Focus          (focusGetCurrent, focusRingCursor)
 
@@ -54,7 +54,7 @@ data AppState =
 makeLenses ''AppState
 
 seg :: String -> Lens' SegmentMap Bool
-seg k = lens (fromMaybe False . M.lookup k) (\m b -> if b then M.insert k True m else M.delete k m)
+seg k = lens (fromMaybe False . M.lookup k) (\m b -> M.insert k b m)
 
 
 -- Forms
@@ -81,23 +81,38 @@ draw :: Form AppState e Name -> [Widget Name]
 draw f = [C.vCenter $ C.hCenter form <=> C.hCenter help]
   where
     form = B.border $ padTop (Pad 1) $ hLimit 88 $ renderForm f
-    help = padTop (Pad 1) $ B.borderWithLabel (str "Output") body
-    body = str $ show $ _output $ formState f
+    help = padTop (Pad 1) $ B.borderWithLabel (str "Output") (str body)
+    body = case _output (formState f) of
+             Just (ExitSuccess, o, _) -> o
+             o                        -> show o
+
+
+segs :: Form AppState e n -> SegmentMap
+segs = _segments . formState
 
 eventHandler :: Form AppState e Name -> BrickEvent Name e -> EventM Name (Next (Form AppState e Name))
-eventHandler s ev =
+eventHandler s ev = do
+  let psegs = segs s
   case ev of
       VtyEvent (V.EvResize {})       -> continue s
       VtyEvent (V.EvKey V.KEsc [])   -> halt s
       _ -> do
         s' <- handleFormEvent ev s
-        if focusGetCurrent (formFocus s') == Just Command
-           then s' & formState & output .~ Nothing & mkForm & continue
-           else do
-             case ev of
-               VtyEvent (V.EvKey (V.KChar 'q') [])        -> halt s
-               VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]) -> halt s
-               _                                          -> continue s'
+        case focusGetCurrent (formFocus s') of
+          Nothing      -> continue s'
+          Just Command -> do
+            let c = s' & formState & _command & T.unpack
+            o <- liftIO $ getOut c (getPath s')
+            s' & formState & output .~ (Just o) & mkForm & continue -- Could mess with focus...
+          Just f -> do
+            case ev of
+              VtyEvent (V.EvKey (V.KChar 'q') [])        -> halt s
+              VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]) -> halt s
+              _ | psegs == segs s'                       -> continue s'
+              _ -> do
+                let c = s' & formState & _command & T.unpack
+                o <- liftIO $ getOut c (getPath s')
+                s' & formState & output .~ (Just o) & mkForm & setFormFocus f & continue -- Could mess with focus...
 
 app :: App (Form AppState e Name) e Name
 app =
@@ -108,18 +123,26 @@ app =
         , appHandleEvent  = eventHandler
         }
 
-getOut :: [Char] -> [Char] -> IO (ExitCode, String, String)
+getOut :: String -> [String] -> IO (ExitCode, String, String)
 getOut s p = do
   let
     p1 = P.shell s
-    p2 = p1 { P.env = Just [("PATH", p)] }
+    p2 = p1 { P.env = Just [("PATH", mkPath p)] }
 
   P.readCreateProcessWithExitCode p2 ""
 
+mkPath :: [[Char]] -> [Char]
+mkPath  = intercalate ":"
+
+getPath :: Form AppState e n -> [String]
+getPath = map fst . filter snd . M.toList . _segments . formState
+
 main :: IO ()
 main = do
-    path <- Env.getEnv "PATH"
-    out  <- Just <$> getOut "date +s" []
+    let initialCommand = "ls"
+
+    path <- splitOn ":" <$> Env.getEnv "PATH"
+    out  <- Just <$> getOut initialCommand path
 
     let buildVty = do
           v <- V.mkVty =<< V.standardIOConfig
@@ -128,8 +151,8 @@ main = do
 
         state =
           AppState
-            { _command  = "date +s"
-            , _segments = M.fromList $ zip (splitOn ":" path) (repeat True)
+            { _command  = T.pack initialCommand
+            , _segments = M.fromList $ zip path (repeat True)
             , _output   = out
             }
 
