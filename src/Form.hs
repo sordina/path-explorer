@@ -86,7 +86,7 @@ style = Brick.attrMap V.defAttr
   ]
 
 draw :: Form AppState e Name -> [Brick.Widget Name]
-draw f = [ Brick.padTop (Brick.Pad 2) (Brick.hCenter form) <=> Brick.hCenter outW]
+draw f = [ Brick.padTop (Brick.Pad 2) (Brick.hCenter form) <=> Brick.padAll 2 (Brick.str "Keys: Up/Down/Left/Right") <=> Brick.hCenter outW]
   where
     out "" = ""
     out o  = "\n\nSTDOUT:\n\n" <> o
@@ -124,8 +124,13 @@ eventHandler chan s e = do
     psegs = segs s
     c     = cmd s
     c'    = cmd s'
+    sp    = Brick.viewportScroll OutPort
 
   case (e, Brick.focusGetCurrent (formFocus s')) of
+    (Brick.VtyEvent (V.EvKey V.KUp _), _)                             -> Brick.vScrollBy sp (-1)  >> Brick.continue s'
+    (Brick.VtyEvent (V.EvKey V.KDown _), _)                           -> Brick.vScrollBy sp 1     >> Brick.continue s'
+    (Brick.VtyEvent (V.EvKey V.KLeft _), _)                           -> Brick.vScrollBy sp (-10) >> Brick.continue s'
+    (Brick.VtyEvent (V.EvKey V.KRight _), _)                          -> Brick.vScrollBy sp 10    >> Brick.continue s'
     (Brick.VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]), _)             -> Brick.halt s
     (Brick.VtyEvent (V.EvKey (V.KChar 'q') _), x) | x /= Just Command -> Brick.halt s
     _ | psegs == segs s' && c == c'                                   -> Brick.continue s'
