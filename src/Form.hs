@@ -130,10 +130,9 @@ eventHandler chan s e = do
     c'    = cmd s'
 
   case (e, focusGetCurrent (formFocus s')) of
-    (VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]), _)    -> halt s
-    (VtyEvent (V.EvKey (V.KChar 'q') _), Just Command) -> continue s'
-    (VtyEvent (V.EvKey (V.KChar 'q') _), _)            -> halt s
-    _ | psegs == segs s' && c == c'                    -> continue s'
+    (VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]), _)             -> halt s
+    (VtyEvent (V.EvKey (V.KChar 'q') _), x) | x /= Just Command -> halt s
+    _ | psegs == segs s' && c == c'                             -> continue s'
     _ -> do
       liftIO $ Async.cancel $ unHide $ _action $ formState $ s'
       a <- getOut chan c' (getPath s')
