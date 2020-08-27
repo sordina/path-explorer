@@ -80,39 +80,42 @@ style = attrMap V.defAttr
 draw :: Form AppState e Name -> [Widget Name]
 draw f = [C.vCenter $ C.hCenter form <=> C.hCenter help]
   where
-    form = B.border $ padTop (Pad 1) $ hLimit 88 $ renderForm f
-    help = padTop (Pad 1) $ B.borderWithLabel (str "Output") (str body)
-    body = case _output (formState f) of
-             Just (ExitSuccess, o, _) -> o
-             o                        -> show o
-
+    out "" = ""
+    out o  = "\n\nSTDOUT:\n\n" <> o
+    err "" = ""
+    err e  = "\n\nSTDERR:\n\n" <> e
+    form   = B.border $ padTop (Pad 1) $ hLimit 88 $ renderForm f
+    help   = padTop (Pad 1) $ B.borderWithLabel (str "Output") (str body)
+    body   = case _output (formState f) of
+               Nothing                  -> "Unknown Error"
+               Just (ExitSuccess, o, _) -> o
+               Just (c, o, e)           -> "Error: " <> show c <> out o <> err e
 
 segs :: Form AppState e n -> SegmentMap
 segs = _segments . formState
 
+cmd :: Form AppState e n -> String
+cmd = T.unpack . _command . formState
+
 eventHandler :: Form AppState e Name -> BrickEvent Name e -> EventM Name (Next (Form AppState e Name))
-eventHandler s ev = do
-  let psegs = segs s
-  case ev of
-      VtyEvent (V.EvResize {})       -> continue s
-      VtyEvent (V.EvKey V.KEsc [])   -> halt s
-      _ -> do
-        s' <- handleFormEvent ev s
-        case focusGetCurrent (formFocus s') of
-          Nothing      -> continue s'
-          Just Command -> do
-            let c = s' & formState & _command & T.unpack
-            o <- liftIO $ getOut c (getPath s')
-            s' & formState & output .~ (Just o) & mkForm & continue -- Could mess with focus...
-          Just f -> do
-            case ev of
-              VtyEvent (V.EvKey (V.KChar 'q') [])        -> halt s
-              VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]) -> halt s
-              _ | psegs == segs s'                       -> continue s'
-              _ -> do
-                let c = s' & formState & _command & T.unpack
-                o <- liftIO $ getOut c (getPath s')
-                s' & formState & output .~ (Just o) & mkForm & setFormFocus f & continue -- Could mess with focus...
+eventHandler s (VtyEvent (V.EvResize {}))            = continue s
+eventHandler s (VtyEvent (V.EvKey V.KEsc _))         = halt s
+eventHandler s (VtyEvent (V.EvKey (V.KChar 'q') [])) = halt s
+eventHandler s e = do
+  s' <- handleFormEvent e s
+
+  let
+    psegs = segs s
+    c     = cmd s
+    c'    = cmd s'
+
+  case (e, focusGetCurrent (formFocus s')) of
+    (VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]), _) -> halt s
+    _ | psegs == segs s' && c == c'                 -> continue s'
+    (_, Nothing)                                    -> continue s'
+    (_, Just f)                                     -> do
+      o <- liftIO $ getOut c' (getPath s')
+      s' & formState & output .~ (Just o) & mkForm & setFormFocus f & continue
 
 app :: App (Form AppState e Name) e Name
 app =
@@ -161,5 +164,5 @@ main = do
     initialVty <- buildVty
     result     <- customMain initialVty buildVty Nothing app form
 
-    putStrLn $ ("PATH=" ++) $  intercalate ":" $ M.keys $ _segments $ formState result
+    putStrLn $ ("PATH=" ++) $ mkPath $ getPath result
 
