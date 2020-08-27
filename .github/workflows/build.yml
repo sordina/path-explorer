@@ -2,8 +2,12 @@ name: path-explorer-build
 on: push
 jobs:
   build-hs:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-18.04
     name: Build Path-Explorer
-    runs-on: ubuntu-18.04
+    runs-on: ${{ matrix.os }}
     env:
       BOOTSTRAP_HASKELL_NONINTERACTIVE: true
       BOOTSTRAP_HASKELL_NO_UPGRADE: true
@@ -11,9 +15,9 @@ jobs:
       BOOTSTRAP_HASKELL_CABAL_VERSION: 3.2.0.0
     steps:
       - uses: actions/checkout@v2
-      - run: rm -rf /var/lib/apt/lists/lock
-      - run: apt update
-      - run: apt install -y build-essential curl libffi-dev libffi6 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5
+      - run: whoami
+      - run: sudo apt update
+      - run: sudo apt install -y build-essential curl libffi-dev libffi6 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5
       - run: curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh
       - run: echo "::add-path::$HOME/.ghcup/bin"
       - run: cabal build

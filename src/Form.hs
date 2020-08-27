@@ -6,8 +6,6 @@
 
 module Form where
 
--- TODO: VSCode
-
 import qualified Control.Concurrent.Async as Async
 import qualified Data.Map                 as M
 import qualified Data.Text                as T
@@ -100,11 +98,11 @@ draw f = [C.vCenter $ C.hCenter form <=> C.hCenter help]
     err "" = ""
     err e  = "\n\nSTDERR:\n\n" <> e
     form   = B.border $ padTop (Pad 1) $ hLimit 88 $ renderForm f
-    help   = padTop (Pad 1) $ B.borderWithLabel (str "Output") (str body)
+    help   = padTop (Pad 1) $ B.borderWithLabel (str (fst body)) (str (snd body))
     body   = case _output (formState f) of
-               Right (ExitSuccess, o, _) -> o
-               Left s                    -> s
-               Right (c, o, e)           -> "Error: " <> show c <> out o <> err e
+               Right (ExitSuccess, o, _) -> ("Success", o)
+               Left s                    -> ("", s)
+               Right (c, o, e)           -> ("Failure", "Error: " <> show c <> out o <> err e)
 
 segs :: Form AppState e n -> PathSegments
 segs = _segments . formState
