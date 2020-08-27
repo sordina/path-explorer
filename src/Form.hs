@@ -2,7 +2,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE BlockArguments   #-}
+{-# LANGUAGE BlockArguments    #-}
+{-# LANGUAGE PatternSynonyms   #-}
 
 module Form where
 
@@ -30,6 +31,7 @@ import qualified Brick.BChan           as Brick
 import qualified Brick.Focus           as Brick
 import qualified Brick.Forms           as Brick
 import qualified Graphics.Vty          as V
+import qualified Graphics.Vty.Input.Events as Brick
 
 -- Types and Lenses
 
@@ -106,8 +108,6 @@ segs = _segments . Brick.formState
 cmd :: Brick.Form AppState e n -> String
 cmd = T.unpack . _command . Brick.formState
 
--- TODO: updatePreserveFocus :: ...
-
 setFF :: Eq n => Brick.Form s e n -> Brick.Form s e n -> Brick.Form s e n
 setFF s s' =
   case Brick.focusGetCurrent (Brick.formFocus s) of
@@ -129,6 +129,12 @@ reorderL n d o =
     (x,y:z) -> let (x',z') = splitAt (n+d) (x++z) in x' ++ [y] ++ z'
     _       -> o
 
+pattern VtyC :: Char -> [Brick.Modifier] -> Brick.BrickEvent n e
+pattern VtyC c ms = Brick.VtyEvent (V.EvKey (V.KChar c) ms)
+
+pattern VtyE :: Brick.Key -> [Brick.Modifier] -> Brick.BrickEvent n e
+pattern VtyE k ms = Brick.VtyEvent (V.EvKey k ms)
+
 eventHandler :: Bus -> Brick.Form AppState e Name -> Brick.BrickEvent Name e -> Brick.EventM Name (Brick.Next (Brick.Form AppState e Name))
 eventHandler _ s (Brick.VtyEvent (V.EvResize {}))    = Brick.continue s
 eventHandler _ s (Brick.VtyEvent (V.EvKey V.KEsc _)) = Brick.halt s
@@ -142,27 +148,30 @@ eventHandler chan s e = do
     sp    = Brick.viewportScroll OutPort
     f     = Brick.formFocus s'
     cf    = Brick.focusGetCurrent f
-    Just pf = Brick.focusGetCurrent $ Brick.focusPrev f -- TODO: Partial
-    Just nf = Brick.focusGetCurrent $ Brick.focusNext f
+    pf    = Brick.focusGetCurrent $ Brick.focusPrev f
+    nf    = Brick.focusGetCurrent $ Brick.focusNext f
+
+    newF (Just x) = Brick.continue $ Brick.setFormFocus x s'
+    newF Nothing  = Brick.continue s'
 
   case e of
-    Brick.VtyEvent (V.EvKey (V.KChar 'q') _) | cf /= Just Command -> Brick.halt s
+    VtyC 'q' _ | cf /= Just Command -> Brick.halt s
 
-    Brick.VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]) -> Brick.halt s
-    Brick.VtyEvent (V.EvKey (V.KChar 'n') [V.MCtrl]) -> Brick.continue $ Brick.setFormFocus nf s'
-    Brick.VtyEvent (V.EvKey (V.KChar 'p') [V.MCtrl]) -> Brick.continue $ Brick.setFormFocus pf s'
-    Brick.VtyEvent (V.EvKey (V.KChar 'k') [V.MCtrl]) -> Brick.vScrollBy sp (-1) >> Brick.continue s'
-    Brick.VtyEvent (V.EvKey (V.KChar 'j') [V.MCtrl]) -> Brick.vScrollBy sp 1    >> Brick.continue s'
-    Brick.VtyEvent (V.EvKey (V.KChar 'l') [V.MCtrl]) -> Brick.vScrollBy sp 1    >> Brick.continue s'
+    VtyC 'c' [V.MCtrl] -> Brick.halt s
+    VtyC 'n' [V.MCtrl] -> newF nf
+    VtyC 'p' [V.MCtrl] -> newF pf
+    VtyC 'k' [V.MCtrl] -> Brick.vScrollBy sp (-1) >> Brick.continue s'
+    VtyC 'j' [V.MCtrl] -> Brick.vScrollBy sp 1    >> Brick.continue s'
+    VtyC 'l' [V.MCtrl] -> Brick.vScrollBy sp 1    >> Brick.continue s'
 
-    Brick.VtyEvent (V.EvKey (V.KChar 'u') [V.MCtrl]) -> reorder (-1) s'
-    Brick.VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl]) -> reorder (1)  s'
+    VtyC 'u' [V.MCtrl] -> reorder (-1) s'
+    VtyC 'd' [V.MCtrl] -> reorder (1)  s'
 
-    Brick.VtyEvent (V.EvKey V.KUp _)    -> Brick.vScrollBy sp (-1)  >> Brick.continue s'
-    Brick.VtyEvent (V.EvKey V.KDown _)  -> Brick.vScrollBy sp 1     >> Brick.continue s'
-    Brick.VtyEvent (V.EvKey V.KLeft _)  -> Brick.vScrollBy sp (-10) >> Brick.continue s'
-    Brick.VtyEvent (V.EvKey V.KRight _) -> Brick.vScrollBy sp 10    >> Brick.continue s'
-    Brick.VtyEvent (V.EvKey V.KEnter _) -> Brick.setFormFocus Command s' & Brick.continue
+    VtyE V.KUp    _ -> Brick.vScrollBy sp (-1)  >> Brick.continue s'
+    VtyE V.KDown  _ -> Brick.vScrollBy sp 1     >> Brick.continue s'
+    VtyE V.KLeft  _ -> Brick.vScrollBy sp (-10) >> Brick.continue s'
+    VtyE V.KRight _ -> Brick.vScrollBy sp 10    >> Brick.continue s'
+    VtyE V.KEnter _ -> Brick.setFormFocus Command s' & Brick.continue
 
     _ | psegs == segs s' && c == c' -> Brick.continue s'
 
