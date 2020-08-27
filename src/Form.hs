@@ -35,21 +35,13 @@ import qualified Graphics.Vty.Input.Events as Brick
 
 -- Types and Lenses
 
-data Name
-  = Segment Int
-  | Command
-  | OutPort
-  deriving (Eq, Ord, Show)
-
-type PathSegments = [(String, Bool)]
-
-data Hide a = Hide { unHide :: a }
+data    Name = Segment Int | Command | OutPort deriving (Eq, Ord, Show)
+type    PathSegments = [(String, Bool)]
+type    ProcessResult = (ExitCode, String, String)
+type    Bus = Brick.BChan ()
+newtype Hide a = Hide { unHide :: a }
 
 instance Show (Hide a) where show (Hide _) = "HIDDEN"
-
-type ProcessResult = (ExitCode, String, String)
-
-type Bus = Brick.BChan ()
 
 data AppState = AppState
     { _command  :: T.Text
@@ -68,13 +60,13 @@ seg k = lens (fromMaybe False . lookup k) (\m b -> map (\(x,y) -> if x == k then
 
 mkForm :: AppState -> Brick.Form AppState e Name
 mkForm state =
-    let label s w = Brick.padBottom (Brick.Pad 1) $ (Brick.vLimit 1 $ Brick.hLimit 15 $ Brick.str s <+> Brick.fill ' ') <+> w
-    in flip Brick.newForm state $
-      [ label "Command" @@= Brick.editTextField command Command (Just 1)
-      ] ++ zipWith makeSegInput [0..] (_segments state)
+  flip Brick.newForm state $
+    (label "Command" @@= Brick.editTextField command Command (Just 1))
+    : zipWith makeSegInput [0..] (_segments state)
 
   where
-  makeSegInput i (k, _v) = Brick.checkboxField (segments . seg k) (Segment i) (T.pack k)
+    label s w = Brick.padBottom (Brick.Pad 1) $ (Brick.vLimit 1 $ Brick.hLimit 15 $ Brick.str s <+> Brick.fill ' ') <+> w
+    makeSegInput i (k, _v) = Brick.checkboxField (segments . seg k) (Segment i) (T.pack k)
 
 style :: Brick.AttrMap
 style = Brick.attrMap V.defAttr
