@@ -100,7 +100,6 @@ cmd = T.unpack . _command . formState
 eventHandler :: Form AppState e Name -> BrickEvent Name e -> EventM Name (Next (Form AppState e Name))
 eventHandler s (VtyEvent (V.EvResize {}))            = continue s
 eventHandler s (VtyEvent (V.EvKey V.KEsc _))         = halt s
-eventHandler s (VtyEvent (V.EvKey (V.KChar 'q') [])) = halt s
 eventHandler s e = do
   s' <- handleFormEvent e s
 
@@ -110,10 +109,12 @@ eventHandler s e = do
     c'    = cmd s'
 
   case (e, focusGetCurrent (formFocus s')) of
-    (VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]), _) -> halt s
-    _ | psegs == segs s' && c == c'                 -> continue s'
-    (_, Nothing)                                    -> continue s'
-    (_, Just f)                                     -> do
+    (VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl]), _)    -> halt s
+    (VtyEvent (V.EvKey (V.KChar 'q') _), Just Command) -> continue s'
+    (VtyEvent (V.EvKey (V.KChar 'q') _), _)            -> halt s
+    _ | psegs == segs s' && c == c'                    -> continue s'
+    (_, Nothing)                                       -> continue s'
+    (_, Just f)                                        -> do
       o <- liftIO $ getOut c' (getPath s')
       s' & formState & output .~ (Just o) & mkForm & setFormFocus f & continue
 
