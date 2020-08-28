@@ -6,19 +6,26 @@ jobs:
       matrix:
         os:
           - ubuntu-18.04
+        ghc: 8.10.2
+        cabal: 3.2.0.0
     name: Build Path-Explorer
     runs-on: ${{ matrix.os }}
-    env:
-      BOOTSTRAP_HASKELL_NONINTERACTIVE: true
-      BOOTSTRAP_HASKELL_NO_UPGRADE: true
-      BOOTSTRAP_HASKELL_GHC_VERSION: 8.10.2
-      BOOTSTRAP_HASKELL_CABAL_VERSION: 3.2.0.0
+    # env:
+    #   BOOTSTRAP_HASKELL_NONINTERACTIVE: true
+    #   BOOTSTRAP_HASKELL_NO_UPGRADE: true
+    #   BOOTSTRAP_HASKELL_GHC_VERSION: ${{matrix.ghc}}
+    #   BOOTSTRAP_HASKELL_CABAL_VERSION: ${{matrix.cabal}}
     steps:
       - uses: actions/checkout@v2
-      - run: whoami
-      - run: sudo apt update
-      - run: sudo apt install -y build-essential curl libffi-dev libffi6 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5
-      - run: curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh
-      - run: echo "::add-path::$HOME/.ghcup/bin"
+      - uses: actions/setup-haskell@v1.1
+        with:
+          ghc-version: ${{matrix.ghc}}
+          cabal-version: ${{matrix.cabal}}
+
+      # - run: whoami
+      # - run: sudo apt update
+      # - run: sudo apt install -y build-essential curl libffi-dev libffi6 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5
+      # - run: curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh
+      # - run: echo "::add-path::$HOME/.ghcup/bin"
       - run: cabal build
 
