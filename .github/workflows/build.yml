@@ -6,8 +6,10 @@ jobs:
       matrix:
         os:
           - ubuntu-18.04
-        ghc: 8.10.2
-        cabal: 3.2.0.0
+        ghc:
+          - "8.10.2"
+        cabal:
+          - "3.2.0.0"
     name: Build Path-Explorer
     runs-on: ${{ matrix.os }}
     # env:
