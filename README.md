@@ -14,10 +14,18 @@ Interactive TUI for pruning your path.
 
 ## Limitations
 
-Oftem your path will be constructed by referencing variables, but this works in expanded form.
+Often your path will be constructed by referencing variables, but this works in expanded form.
+
+## TODO
+
+* [ ] Alllow mouse scrolling in output sections
+* [ ] Help for keys
+* [ ] Allow insertion of new path segements
+* [ ] Command history
 
 ## Bash Prototype
 
+A simple prototype in Bash to test the concept.
 
 ```bash
 #!/bin/bash
