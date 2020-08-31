@@ -2,6 +2,8 @@
 
 Interactive TUI for pruning your path.
 
+![Path Explorer](https://github.com/sordina/path-explorer/blob/master/path-explorer.png?raw=true)
+
 ## Functions
 
 * Show path
