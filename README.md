@@ -2,6 +2,18 @@
 
 Interactive TUI for pruning your path.
 
+## Functions
+
+* Show path
+* Enable / disable path segments
+* Reorder path
+* Test command against WIP path
+* Output PATH once done
+
+## Limitations
+
+Oftem your path will be constructed by referencing variables, but this works in expanded form.
+
 ## Bash Prototype
 
 
