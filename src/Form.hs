@@ -93,12 +93,6 @@ segs = _segments . Brick.formState
 cmd :: Brick.Form AppState e n -> String
 cmd = T.unpack . _command . Brick.formState
 
-setFF' :: Eq n => Brick.Form s e n -> Brick.Form s e n -> Brick.Form s e n
-setFF' s s' =
-  case Brick.focusGetCurrent (Brick.formFocus s) of
-    Nothing -> s'
-    Just f  -> Brick.setFormFocus f s'
-
 reorder :: Int -> Brick.Form AppState e Name -> Brick.EventM n (Brick.Next (Brick.Form AppState e Name))
 reorder d s = case Brick.focusGetCurrent $ Brick.formFocus s of
   Just (Segment n) ->
