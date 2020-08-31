@@ -53,20 +53,13 @@ data AppState = AppState
 
 makeLenses ''AppState
 
+formStateLens :: Lens' (Brick.Form s e n) s
+formStateLens = lens Brick.formState (\f s -> f { Brick.formState = s })
+
 seg :: String -> Lens' PathSegments Bool
 seg k = lens (fromMaybe False . lookup k) (\m b -> map (\(x,y) -> if x == k then (x,b) else (x,y)) m)
 
 -- Forms
-
-mkForm :: AppState -> Brick.Form AppState e Name
-mkForm state =
-  flip Brick.newForm state $
-    (label "Command" @@= Brick.editTextField command Command (Just 1))
-    : zipWith makeSegInput [0..] (_segments state)
-
-  where
-    label s w = Brick.padBottom (Brick.Pad 1) $ (Brick.vLimit 1 $ Brick.hLimit 15 $ Brick.str s <+> Brick.fill ' ') <+> w
-    makeSegInput i (k, _v) = Brick.checkboxField (segments . seg k) (Segment i) (T.pack k)
 
 style :: Brick.AttrMap
 style = Brick.attrMap V.defAttr
@@ -100,8 +93,8 @@ segs = _segments . Brick.formState
 cmd :: Brick.Form AppState e n -> String
 cmd = T.unpack . _command . Brick.formState
 
-setFF :: Eq n => Brick.Form s e n -> Brick.Form s e n -> Brick.Form s e n
-setFF s s' =
+setFF' :: Eq n => Brick.Form s e n -> Brick.Form s e n -> Brick.Form s e n
+setFF' s s' =
   case Brick.focusGetCurrent (Brick.formFocus s) of
     Nothing -> s'
     Just f  -> Brick.setFormFocus f s'
@@ -110,7 +103,7 @@ reorder :: Int -> Brick.Form AppState e Name -> Brick.EventM n (Brick.Next (Bric
 reorder d s = case Brick.focusGetCurrent $ Brick.formFocus s of
   Just (Segment n) ->
     let a = reorderL n d o
-    in s & Brick.formState & segments .~ a & mkForm & Brick.setFormFocus (Segment (n+d)) & Brick.continue
+    in s & formStateLens . segments .~ a & Brick.setFormFocus (Segment (n+d)) & Brick.continue
   _ -> Brick.continue s
   where
     o = s & Brick.formState & _segments
@@ -170,14 +163,14 @@ eventHandler chan s e = do
     _ -> do
       liftIO $ Async.cancel $ unHide $ _action $ Brick.formState $ s'
       a <- getOut chan c' (getPath s')
-      s' & Brick.formState & action .~ a & mkForm & setFF s' & Brick.continue
+      s' & formStateLens . action .~ a & Brick.continue
 
 resolveAction :: MonadIO m => Brick.Form AppState e Name -> m (Brick.Form AppState e Name)
 resolveAction s = do
   p <- liftIO $ Async.poll $ unHide $ _action $ Brick.formState s
   case p of
-    Nothing -> return $ s & Brick.formState & output .~ Left "Loading" & mkForm & setFF s
-    Just r  -> return $ s & Brick.formState & output .~ left show r & mkForm & setFF s
+    Nothing -> return $ s & formStateLens . output .~ Left "Loading"
+    Just r  -> return $ s & formStateLens . output .~ left show r
 
 app :: Bus -> Brick.App (Brick.Form AppState e Name) e Name
 app chan =
@@ -238,3 +231,14 @@ main = do
     result     <- Brick.customMain initialVty buildVty (Just chan) (app chan) form
 
     putStrLn $ ("PATH=" ++) $ mkPath $ getPath result
+
+  where
+
+    mkForm :: AppState -> Brick.Form AppState e Name
+    mkForm state =
+      flip Brick.newForm state $
+        (label "Command" @@= Brick.editTextField command Command (Just 1))
+        : zipWith makeSegInput [0..] (_segments state)
+
+    label s w = Brick.padBottom (Brick.Pad 1) $ (Brick.vLimit 1 $ Brick.hLimit 15 $ Brick.str s <+> Brick.fill ' ') <+> w
+    makeSegInput i (k, _v) = Brick.checkboxField (segments . seg k) (Segment i) (T.pack k)
