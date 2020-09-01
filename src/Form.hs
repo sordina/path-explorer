@@ -24,14 +24,13 @@ import qualified System.Process           as P
 import Brick       ((<+>), (<=>))
 import Brick.Forms ((@@=))
 import qualified Brick
-import qualified Brick.Widgets.Border  as Brick
-import qualified Brick.Widgets.Center  as Brick
-import qualified Brick.Widgets.Edit    as Brick
-import qualified Brick.BChan           as Brick
-import qualified Brick.Focus           as Brick
-import qualified Brick.Forms           as Brick
-import qualified Graphics.Vty          as V
-import qualified Graphics.Vty.Input.Events as Brick
+import qualified Brick.Widgets.Border      as Brick
+import qualified Brick.Widgets.Center      as Brick
+import qualified Brick.Widgets.Edit        as Brick
+import qualified Brick.BChan               as Brick
+import qualified Brick.Focus               as Brick
+import qualified Brick.Forms               as Brick
+import qualified Graphics.Vty              as Brick
 
 -- Types and Lenses
 
@@ -71,8 +70,8 @@ main = do
 
     let
       buildVty = do
-        v <- V.mkVty =<< V.standardIOConfig
-        V.setMode (V.outputIface v) V.Mouse True
+        v <- Brick.mkVty =<< Brick.standardIOConfig
+        Brick.setMode (Brick.outputIface v) Brick.Mouse True
         return v
 
       appState =
@@ -111,14 +110,14 @@ mkForm state =
 -- Event handler
 
 pattern VtyC :: Char -> [Brick.Modifier] -> Brick.BrickEvent n e
-pattern VtyC c ms = Brick.VtyEvent (V.EvKey (V.KChar c) ms)
+pattern VtyC c ms = Brick.VtyEvent (Brick.EvKey (Brick.KChar c) ms)
 
 pattern VtyE :: Brick.Key -> [Brick.Modifier] -> Brick.BrickEvent n e
-pattern VtyE k ms = Brick.VtyEvent (V.EvKey k ms)
+pattern VtyE k ms = Brick.VtyEvent (Brick.EvKey k ms)
 
 eventHandler :: Bus -> Brick.Form AppState e Name -> Brick.BrickEvent Name e -> Brick.EventM Name (Brick.Next (Brick.Form AppState e Name))
-eventHandler _ s (Brick.VtyEvent (V.EvResize {}))    = Brick.continue s
-eventHandler _ s (Brick.VtyEvent (V.EvKey V.KEsc _)) = Brick.halt s
+eventHandler _ s (Brick.VtyEvent (Brick.EvResize {}))    = Brick.continue s
+eventHandler _ s (Brick.VtyEvent (Brick.EvKey Brick.KEsc _)) = Brick.halt s
 eventHandler chan s e = do
   s' <- Brick.handleFormEvent e s >>= resolveAction
 
@@ -133,21 +132,21 @@ eventHandler chan s e = do
   case e of
     VtyC 'q' _ | cf /= Just Command -> Brick.halt s
 
-    VtyC 'c' [V.MCtrl] -> Brick.halt s
-    VtyC 'n' [V.MCtrl] -> Brick.continue $ focus Brick.focusNext s'
-    VtyC 'p' [V.MCtrl] -> Brick.continue $ focus Brick.focusPrev s'
-    VtyC 'k' [V.MCtrl] -> Brick.vScrollBy sp (-1) >> Brick.continue s'
-    VtyC 'j' [V.MCtrl] -> Brick.vScrollBy sp 1    >> Brick.continue s'
-    VtyC 'l' [V.MCtrl] -> Brick.vScrollBy sp 1    >> Brick.continue s'
+    VtyC 'c' [Brick.MCtrl] -> Brick.halt s
+    VtyC 'n' [Brick.MCtrl] -> Brick.continue $ focus Brick.focusNext s'
+    VtyC 'p' [Brick.MCtrl] -> Brick.continue $ focus Brick.focusPrev s'
+    VtyC 'k' [Brick.MCtrl] -> Brick.vScrollBy sp (-1) >> Brick.continue s'
+    VtyC 'j' [Brick.MCtrl] -> Brick.vScrollBy sp 1    >> Brick.continue s'
+    VtyC 'l' [Brick.MCtrl] -> Brick.vScrollBy sp 1    >> Brick.continue s'
 
-    VtyC 'u' [V.MCtrl] -> Brick.continue $ reorder (-1) s'
-    VtyC 'd' [V.MCtrl] -> Brick.continue $ reorder (1)  s'
+    VtyC 'u' [Brick.MCtrl] -> Brick.continue $ reorder (-1) s'
+    VtyC 'd' [Brick.MCtrl] -> Brick.continue $ reorder (1)  s'
 
-    VtyE V.KUp    _ -> Brick.vScrollBy sp (-1)  >> Brick.continue s'
-    VtyE V.KDown  _ -> Brick.vScrollBy sp 1     >> Brick.continue s'
-    VtyE V.KLeft  _ -> Brick.vScrollBy sp (-10) >> Brick.continue s'
-    VtyE V.KRight _ -> Brick.vScrollBy sp 10    >> Brick.continue s'
-    VtyE V.KEnter _ -> Brick.setFormFocus Command s' & Brick.continue
+    VtyE Brick.KUp    _ -> Brick.vScrollBy sp (-1)  >> Brick.continue s'
+    VtyE Brick.KDown  _ -> Brick.vScrollBy sp 1     >> Brick.continue s'
+    VtyE Brick.KLeft  _ -> Brick.vScrollBy sp (-10) >> Brick.continue s'
+    VtyE Brick.KRight _ -> Brick.vScrollBy sp 10    >> Brick.continue s'
+    VtyE Brick.KEnter _ -> Brick.setFormFocus Command s' & Brick.continue
 
     _ | psegs == segs s' && c == c' -> Brick.continue s'
 
@@ -181,11 +180,11 @@ getOut c s p = liftIO $ do
 -- Rendering
 
 style :: Brick.AttrMap
-style = Brick.attrMap V.defAttr
-  [ (Brick.editAttr,             V.white `Brick.on` V.black)
-  , (Brick.editFocusedAttr,      V.black `Brick.on` V.yellow)
-  , (Brick.invalidFormInputAttr, V.white `Brick.on` V.red)
-  , (Brick.focusedFormInputAttr, V.black `Brick.on` V.yellow)
+style = Brick.attrMap Brick.defAttr
+  [ (Brick.editAttr,             Brick.white `Brick.on` Brick.black)
+  , (Brick.editFocusedAttr,      Brick.black `Brick.on` Brick.yellow)
+  , (Brick.invalidFormInputAttr, Brick.white `Brick.on` Brick.red)
+  , (Brick.focusedFormInputAttr, Brick.black `Brick.on` Brick.yellow)
   ]
 
 draw :: Brick.Form AppState e Name -> [Brick.Widget Name]
