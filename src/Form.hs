@@ -8,9 +8,9 @@
 module Form where
 
 import           Control.Arrow            (left)
-import           Lens.Micro               (Lens', lens, (&), (.~))
+import           Lens.Micro               (Lens', lens, (&), (^.), (.~), (%~))
 import           System.Exit              (ExitCode (..))
-import           Data.List                (intercalate, nub)
+import           Data.List                (findIndex, intercalate, nub)
 import           Data.List.Split
 import           Data.Maybe
 import           Lens.Micro.TH
@@ -35,7 +35,7 @@ import qualified Graphics.Vty.Input.Events as Brick
 
 -- Types and Lenses
 
-data    Name = Segment Int | Command | OutPort deriving (Eq, Ord, Show)
+data    Name = Segment String | Command | OutPort deriving (Eq, Ord, Show)
 type    PathSegments = [(String, Bool)]
 type    ProcessResult = (ExitCode, String, String)
 type    Bus = Brick.BChan ()
@@ -56,8 +56,9 @@ makeLenses ''AppState
 formStateLens :: Lens' (Brick.Form s e n) s
 formStateLens = lens Brick.formState (\f s -> f { Brick.formState = s })
 
-seg :: String -> Lens' PathSegments Bool
-seg k = lens (fromMaybe False . lookup k) (\m b -> map (\(x,y) -> if x == k then (x,b) else (x,y)) m)
+-- | 'lookup' style lens with default value
+seg :: Eq a => b -> a -> Lens' [(a,b)] b
+seg d k = lens (fromMaybe d . lookup k) (\m b -> map (\(x,y) -> if x == k then (x,b) else (x,y)) m)
 
 -- Forms
 
@@ -94,13 +95,13 @@ cmd :: Brick.Form AppState e n -> String
 cmd = T.unpack . _command . Brick.formState
 
 reorder :: Int -> Brick.Form AppState e Name -> Brick.EventM n (Brick.Next (Brick.Form AppState e Name))
-reorder d s = case Brick.focusGetCurrent $ Brick.formFocus s of
-  Just (Segment n) ->
-    let a = reorderL n d o
-    in s & formStateLens . segments .~ a & Brick.setFormFocus (Segment (n+d)) & Brick.continue
-  _ -> Brick.continue s
-  where
-    o = s & Brick.formState & _segments
+reorder d s = Brick.continue
+  case Brick.focusGetCurrent $ Brick.formFocus s of
+    Just (Segment n) ->
+      case findIndex ((== n) . fst) (s ^. formStateLens . segments) of
+        Just i -> s & Brick.formState & segments %~ reorderL i d & deriveForm s
+        _ -> s
+    _ -> s
 
 reorderL :: Int -> Int -> [a] -> [a]
 reorderL n d o =
@@ -113,6 +114,14 @@ pattern VtyC c ms = Brick.VtyEvent (V.EvKey (V.KChar c) ms)
 
 pattern VtyE :: Brick.Key -> [Brick.Modifier] -> Brick.BrickEvent n e
 pattern VtyE k ms = Brick.VtyEvent (V.EvKey k ms)
+
+focus :: Eq n => (Brick.FocusRing n -> Brick.FocusRing n) -> Brick.Form s e n -> Brick.Form s e n
+focus fun s = case nf of
+  Nothing -> s
+  Just x  -> Brick.setFormFocus x s
+  where
+    f  = Brick.formFocus s
+    nf = Brick.focusGetCurrent $ fun f
 
 eventHandler :: Bus -> Brick.Form AppState e Name -> Brick.BrickEvent Name e -> Brick.EventM Name (Brick.Next (Brick.Form AppState e Name))
 eventHandler _ s (Brick.VtyEvent (V.EvResize {}))    = Brick.continue s
@@ -127,18 +136,13 @@ eventHandler chan s e = do
     sp    = Brick.viewportScroll OutPort
     f     = Brick.formFocus s'
     cf    = Brick.focusGetCurrent f
-    pf    = Brick.focusGetCurrent $ Brick.focusPrev f
-    nf    = Brick.focusGetCurrent $ Brick.focusNext f
-
-    newF (Just x) = Brick.continue $ Brick.setFormFocus x s'
-    newF Nothing  = Brick.continue s'
 
   case e of
     VtyC 'q' _ | cf /= Just Command -> Brick.halt s
 
     VtyC 'c' [V.MCtrl] -> Brick.halt s
-    VtyC 'n' [V.MCtrl] -> newF nf
-    VtyC 'p' [V.MCtrl] -> newF pf
+    VtyC 'n' [V.MCtrl] -> Brick.continue $ focus Brick.focusNext s'
+    VtyC 'p' [V.MCtrl] -> Brick.continue $ focus Brick.focusPrev s'
     VtyC 'k' [V.MCtrl] -> Brick.vScrollBy sp (-1) >> Brick.continue s'
     VtyC 'j' [V.MCtrl] -> Brick.vScrollBy sp 1    >> Brick.continue s'
     VtyC 'l' [V.MCtrl] -> Brick.vScrollBy sp 1    >> Brick.continue s'
@@ -199,6 +203,22 @@ getPath = map fst . filter snd . _segments . Brick.formState
 initialCommand :: String
 initialCommand = "ls"
 
+deriveForm :: Brick.Form s e1 Name -> AppState -> Brick.Form AppState e2 Name
+deriveForm f s =
+  case Brick.focusGetCurrent (Brick.formFocus f) of
+    Nothing -> mkForm s
+    Just f' -> Brick.setFormFocus f' $ mkForm s
+
+mkForm :: AppState -> Brick.Form AppState e Name
+mkForm state =
+  flip Brick.newForm state $
+    (label "Command" @@= Brick.editTextField command Command (Just 1))
+    : map makeSegInput (_segments state)
+
+  where
+    label s w            = Brick.padBottom (Brick.Pad 1) $ (Brick.vLimit 1 $ Brick.hLimit 15 $ Brick.str s <+> Brick.fill ' ') <+> w
+    makeSegInput (k, _v) = Brick.checkboxField (segments . seg False k) (Segment k) (T.pack k)
+
 main :: IO ()
 main = do
     path <- nub . splitOn ":" <$> Env.getEnv "PATH" -- Remove duplicates
@@ -207,32 +227,19 @@ main = do
 
     let
       buildVty = do
-          v <- V.mkVty =<< V.standardIOConfig
-          V.setMode (V.outputIface v) V.Mouse True
-          return v
+        v <- V.mkVty =<< V.standardIOConfig
+        V.setMode (V.outputIface v) V.Mouse True
+        return v
 
-      state =
-          AppState
-            { _command  = T.pack initialCommand
-            , _segments = zip path (repeat True)
-            , _action   = ls
-            , _output   = Left "Nothing Yet!"
-            }
-
-      form = mkForm state
+      appState =
+        AppState
+          { _command  = T.pack initialCommand
+          , _segments = zip path (repeat True)
+          , _action   = ls
+          , _output   = Left "Nothing Yet!"
+          }
 
     initialVty <- buildVty
-    result     <- Brick.customMain initialVty buildVty (Just chan) (app chan) form
+    result     <- Brick.customMain initialVty buildVty (Just chan) (app chan) (mkForm appState)
 
     putStrLn $ ("PATH=" ++) $ mkPath $ getPath result
-
-  where
-
-    mkForm :: AppState -> Brick.Form AppState e Name
-    mkForm state =
-      flip Brick.newForm state $
-        (label "Command" @@= Brick.editTextField command Command (Just 1))
-        : zipWith makeSegInput [0..] (_segments state)
-
-    label s w = Brick.padBottom (Brick.Pad 1) $ (Brick.vLimit 1 $ Brick.hLimit 15 $ Brick.str s <+> Brick.fill ' ') <+> w
-    makeSegInput i (k, _v) = Brick.checkboxField (segments . seg k) (Segment i) (T.pack k)
