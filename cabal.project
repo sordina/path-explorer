@@ -8,6 +8,6 @@ package *
 
 source-repository-package
     type: git
-    location: git@github.com:jtdaugherty/brick.git
+    location: https://github.com/jtdaugherty/brick.git
     tag: 269fb1b205a3c89c40db255632c1e862cb24ae7a
 
